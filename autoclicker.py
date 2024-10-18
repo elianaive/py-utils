@@ -8,6 +8,7 @@ import time
 import random
 from pystray import Icon, MenuItem as item
 from PIL import Image
+import ctypes
 
 # Constants for default values
 DEFAULT_INTERVAL = 0.01
@@ -18,6 +19,15 @@ DEFAULT_CLICK_TYPE = "left"
 DEFAULT_MAX_CLICKS = 0  # 0 means unlimited
 DEFAULT_START_DELAY = 0
 DEFAULT_POSITION = (None, None)
+
+# Load the user32.dll
+user32 = ctypes.windll.user32
+
+# Mouse event flags
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
 
 class AutoClicker:
     def __init__(self, root):
@@ -70,9 +80,9 @@ class AutoClicker:
         frame = ttk.LabelFrame(parent, text="Click Settings", padding="10")
         frame.pack(fill=tk.X, pady=10)
         
-        self.create_entry(frame, "Interval (s):", str(DEFAULT_INTERVAL), 0)
-        self.create_combobox(frame, "Click Type:", ["left", "right", "double"], DEFAULT_CLICK_TYPE, 1)
-        self.create_entry(frame, "Max Clicks:", str(DEFAULT_MAX_CLICKS), 2)
+        self.entry_interval = self.create_entry(frame, "Interval (s):", str(DEFAULT_INTERVAL), 0)
+        self.click_type_var = self.create_combobox(frame, "Click Type:", ["left", "right", "double"], DEFAULT_CLICK_TYPE, 1)
+        self.entry_max_clicks = self.create_entry(frame, "Max Clicks:", str(DEFAULT_MAX_CLICKS), 2)
 
     def create_entry(self, frame, label_text, default_value, row):
         ttk.Label(frame, text=label_text).grid(row=row, column=0, sticky="w", pady=5)
@@ -187,13 +197,50 @@ class AutoClicker:
         threading.Thread(target=self.perform_clicking, daemon=True).start()
 
     def perform_clicking(self):
+        click_funcs = {
+            "left": self.left_click,
+            "right": self.right_click,
+            "double": self.double_click
+        }
+        click_func = click_funcs[self.click_type]
+        
+        start_time = time.perf_counter()
+        click_counter = 0
+        
         while self.clicking and (self.max_clicks == 0 or self.click_count < self.max_clicks):
-            x, y = self.click_position if self.click_position != (None, None) else pyautogui.position()
-            pyautogui.click(x, y) if self.click_type == "left" else pyautogui.rightClick(x, y)
-            self.click_count += 1
-            self.root.after(0, self.update_click_count)
-            time.sleep(max(random.gauss(self.random_mean, self.random_stdev) if self.use_random else self.interval, 0))
+            current_time = time.perf_counter()
+            elapsed = current_time - start_time
+            
+            if elapsed >= self.interval * click_counter:
+                x, y = self.click_position if self.click_position != (None, None) else pyautogui.position()
+                click_func(x, y)
+                click_counter += 1
+                self.click_count += 1
+                
+                if self.interval < 0.1:
+                    if click_counter % 10 == 0:
+                        self.root.after(0, self.update_click_count)
+                else:
+                    self.root.after(0, self.update_click_count)
+            
+            # Yield to other threads briefly
+            time.sleep(0)
+        
         self.stop_clicking()
+
+    def left_click(self, x, y):
+        user32.SetCursorPos(x, y)
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+    def right_click(self, x, y):
+        user32.SetCursorPos(x, y)
+        user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+        user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+
+    def double_click(self, x, y):
+        self.left_click(x, y)
+        self.left_click(x, y)
 
     def stop_clicking(self):
         self.clicking = False
